@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>Eastern Hemisphere Mastery</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<style>
+*{box-sizing:border-box}
+body{margin:0;font-family:Arial,sans-serif;background:#111827;color:#f9fafb}
+header{padding:14px 18px;background:#1f2937;display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap}
+h1{font-size:21px;margin:0}.stats{font-weight:bold}
+.panel{background:#1f2937;padding:11px 15px;display:flex;align-items:center;gap:9px;flex-wrap:wrap}
+button,select{border:0;border-radius:8px;padding:9px 12px;font-weight:bold;cursor:pointer;background:#374151;color:#fff}
+button:hover{background:#4b5563}.primary{background:#2563eb}.primary:hover{background:#1d4ed8}
+#prompt{font-size:17px;font-weight:bold;flex:1;min-width:280px}
+#feedback{font-weight:bold;min-width:190px}
+#map{height:calc(100vh - 144px);min-height:520px}
+.legend{position:absolute;z-index:1000;left:12px;bottom:24px;background:#fff;color:#111;padding:10px;border-radius:8px;box-shadow:0 2px 8px #0005;font-size:12px}
+.dot{display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:5px;background:#2563eb}
+.dot.green{background:#16a34a}.dot.yellow{background:#eab308}.geo-label{font-size:13px;font-weight:800;padding:2px 5px;border:0;background:rgba(255,255,255,.92);box-shadow:0 1px 3px #0005;color:#111;white-space:nowrap}.geo-label:before{display:none}
+.studybar{background:#0f172a;padding:8px 15px;font-size:13px;display:none}
+.studybar.show{display:block}
+@media(max-width:700px){#map{height:calc(100vh - 205px)}#prompt{min-width:100%}}
+</style>
+</head>
+<body>
+<header>
+<h1>🌍 Eastern Hemisphere Mastery</h1>
+<div class="stats">Score: <span id="score">0</span> · Session: <span id="done">0</span> · Mastered: <span id="mastered">0</span>/<span id="total">0</span></div>
+</header>
+<div class="panel">
+<div id="prompt">Study mode: choose a section and learn the map.</div>
+<div id="feedback"></div>
+<select id="section" aria-label="Study section">
+<option value="all">All locations</option>
+<option value="africa">Africa</option>
+<option value="europe">Europe</option>
+<option value="asia">Asia</option>
+<option value="oceania">Southeast Asia & Oceania</option>
+<option value="review">Review weak spots</option>
+</select>
+<button onclick="studyMode()">Study</button>
+<button class="primary" onclick="startQuiz()">Quiz Me</button>
+<button onclick="resetProgress()">Reset Progress</button>
+</div>
+<div class="studybar show">
+Study system: <b>Blue</b> = not mastered · <b style="color:#16a34a">Green</b> = mastered · <b style="color:#ca8a04">Yellow</b> = needs review. Your progress is saved automatically in this browser.
+</div>
+<div id="map"></div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+const places = [
+["Atlantic Ocean",-5,-30],["Pacific Ocean",0,160],["Indian Ocean",-20,75],
+["Mediterranean Sea",36,18],["Black Sea",43,35],["Caspian Sea",41,51],["Aral Sea",45,60],
+["Afro-Eurasia",30,55],["Africa",5,20],["Nile River",25,32],["Niger River",14,0],
+["Congo River",-2,23],["Horn of Africa",10,48],["Cape of Good Hope",-34,18],
+["Ethiopian Plateau",9,39],["Madagascar",-20,47],["the Sahara",24,10],
+["Europe",50,15],["Ural Mountains",60,61],["Asia",35,90],["Siberia",61,105],
+["Kamchatka Peninsula",57,160],["Japan",36,138],["Korean Peninsula",38,127],
+["China Proper",34,112],["Yellow River",37,111],["Yangzi River",31,112],
+["Altai Mountains",49,89],["Gobi Desert",43,105],["Takla Makan Desert / Tarim Basin",39,84],
+["Tian Shan Mountains",42,80],["Southeast Asia",12,105],["Philippines",12,122],
+["Indonesia",-3,117],["Malay Peninsula",5,102],["Strait of Malacca",3,101],
+["New Guinea",-5,142],["Australia",-25,134],["New Zealand",-41,174],
+["Indian Subcontinent",22,79],["Ganges River",25,83],["Indus River",29,70],
+["Himalayas",28,85],["Tibetan Plateau",32,88],["Hindu Kush",35,70],
+["Persia",32,54],["Persian Gulf",27,51],["Tigris River",33,44],
+["Euphrates River",34,39],["Zagros Mountains",33,48],["Caucasus Mountains",43,43],
+["Anatolia / Asia Minor",39,35],["Arabian Peninsula",23,45],["Red Sea",20,38]
+];
+
+const map=L.map('map',{worldCopyJump:true}).setView([25,65],3);
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
+{maxZoom:7,attribution:'© OpenStreetMap contributors'}).addTo(map);
+
+let markers=[];
+places.forEach((p,i)=>{
+  const m=L.circleMarker([p[1],p[2]],{
+    radius:6,weight:2,fillOpacity:.9,color:'#2563eb',fillColor:'#2563eb'
+  }).addTo(map);
+  m.bindTooltip(p[0],{direction:'top',permanent:true,opacity:1,className:'geo-label'});
+  m.on('click',()=>clicked(i));
+  markers.push(m);
+});
+
+let mode='study', current=null, score=0, streak=0, sessionDone=0;
+let mastered=new Set(JSON.parse(localStorage.getItem('ehMastered')||'[]'));
+let wrong=new Set(JSON.parse(localStorage.getItem('ehWrong')||'[]'));
+let seen=new Set(JSON.parse(localStorage.getItem('ehSeen')||'[]'));
+
+document.getElementById('total').textContent=places.length;
+
+function save(){
+  localStorage.setItem('ehMastered',JSON.stringify([...mastered]));
+  localStorage.setItem('ehWrong',JSON.stringify([...wrong]));
+  localStorage.setItem('ehSeen',JSON.stringify([...seen]));
+}
+function colorMarkers(){
+  markers.forEach((m,i)=>{
+    if(mastered.has(i)){
+      m.setStyle({color:'#16a34a',fillColor:'#16a34a',radius:7});
+    }else if(wrong.has(i)){
+      m.setStyle({color:'#eab308',fillColor:'#eab308',radius:7});
+    }else{
+      m.setStyle({color:'#2563eb',fillColor:'#2563eb',radius:6});
+    }
+  });
+}
+function stats(){
+  document.getElementById('score').textContent=score;
+  document.getElementById('done').textContent=sessionDone;
+  document.getElementById('mastered').textContent=mastered.size;
+}
+function studyMode(){
+  mode='study';current=null;
+  document.getElementById('prompt').textContent='Study mode: choose a section, hover over a dot, and use the map to learn locations. Green = mastered, yellow = needs review.';
+  document.getElementById('feedback').textContent='';
+  colorMarkers();
+  markers.forEach(m=>m.openTooltip());
+  stats();
+}
+function startQuiz(){
+  mode='quiz';score=0;streak=0;sessionDone=0;
+  document.getElementById('feedback').textContent='';
+  nextQuestion();
+}
+function getPool(){
+  const filter=document.getElementById('section').value;
+  let pool=places.map((_,i)=>i);
+  if(filter==='africa') pool=pool.filter(i=>i<=16);
+  if(filter==='europe') pool=pool.filter(i=>i>=17&&i<=18);
+  if(filter==='asia') pool=pool.filter(i=>i>=19);
+  if(filter==='oceania') pool=pool.filter(i=>i>=37&&i<=39);
+  if(filter==='review') pool=pool.filter(i=>wrong.has(i)||!mastered.has(i));
+  return pool;
+}
+function nextQuestion(){
+  let pool=getPool();
+  if(!pool.length){finish();return;}
+  // Prefer unmastered locations; occasionally revisit mastered ones for retention.
+  let preferred=pool.filter(i=>!mastered.has(i));
+  if(preferred.length) pool=preferred;
+  current=pool[Math.floor(Math.random()*pool.length)];
+  document.getElementById('prompt').textContent='📍 Find: '+places[current][0];
+  document.getElementById('feedback').textContent='Click the map.';
+}
+function clicked(i){
+  if(mode!=='quiz'||current===null)return;
+  const target=places[current];
+  const d=distance(target[1],target[2],places[i][1],places[i][2]);
+  seen.add(current); sessionDone++;
+  if(i===current){
+    score+=2+(streak>=2?1:0);streak++;
+    mastered.add(current);wrong.delete(current);
+    document.getElementById('feedback').textContent='✅ Correct! '+(streak>=3?'🔥 Streak! ':'')+' +'+(streak>=3?3:2);
+  }else if(d<800){
+    score+=1;streak=0;wrong.add(current);
+    document.getElementById('feedback').textContent='🟡 Close. Correct location: '+target[0];
+  }else{
+    score+=0;streak=0;wrong.add(current);
+    document.getElementById('feedback').textContent='❌ Not quite. Correct location: '+target[0];
+  }
+  save();colorMarkers();stats();
+  setTimeout(nextQuestion,800);
+}
+function finish(){
+  current=null;
+  document.getElementById('prompt').textContent='🎉 Study session complete!';
+  document.getElementById('feedback').textContent='Mastered: '+mastered.size+'/'+places.length+' · Score: '+score;
+}
+function resetProgress(){
+  if(!confirm('Reset all saved mastery and review progress?'))return;
+  mastered.clear();wrong.clear();seen.clear();save();score=0;sessionDone=0;
+  studyMode();
+}
+function distance(lat1,lon1,lat2,lon2){
+  const R=6371,rad=Math.PI/180;
+  const a=Math.sin((lat2-lat1)*rad/2)**2+Math.cos(lat1*rad)*Math.cos(lat2*rad)*Math.sin((lon2-lon1)*rad/2)**2;
+  return 2*R*Math.asin(Math.sqrt(a));
+}
+colorMarkers();stats();studyMode();
+</script>
+</body>
+</html>
